@@ -1,4 +1,4 @@
-import { promises as fs, existsSync } from 'fs';
+import { promises as fs, existsSync, constants } from 'fs';
 import { uuid } from 'uuidv4';
 import { Mint, TxIn, TxOut, Withdrawal } from './interfaces';
 import { JSONValue } from './types';
@@ -290,4 +290,11 @@ export const multiAssetToString = (options: {
   });
   result += '"';
   return result;
+};
+
+export const checkFileExists = (file: string): Promise<boolean> => {
+  return fs
+    .access(file, constants.F_OK)
+    .then(() => true)
+    .catch(() => false);
 };

@@ -3,8 +3,15 @@ import { promises as fs, existsSync, readFileSync } from 'fs';
 import { uuid } from 'uuidv4';
 import Big from 'big.js';
 import util from 'util';
-// TODO: replace all the execSync With exec
-const exec = util.promisify(cpExec);
+
+const pexec = util.promisify(cpExec);
+
+const exec = async (command: string) => {
+  const { stdout, stderr } = await pexec(command);
+  if (stderr) return Promise.reject(stderr);
+  return stdout;
+};
+
 import {
   ConstructorOptions,
   ProtocolParams,
@@ -25,6 +32,7 @@ import testnetShelleyGenesis from './genesis-files/testnet-shelley-genesis.json'
 import {
   auxScriptToString,
   certToString,
+  checkFileExists,
   jsonToPath,
   mintToString,
   multiAssetToString,
@@ -66,44 +74,42 @@ export class CardanoCli {
       }
       this.network === 'mainnet'
         ? (this.networkParam = '--mainnet')
-        : (this.networkParam = '--testnet-magic ');
+        : (this.networkParam = `--testnet-magic ${options.testnetMagic || ''}`);
     }
     const tempDir = `${this.dir}/tmp`;
     if (!existsSync(tempDir)) execSync(`mkdir -p ${tempDir}`);
   }
-  // TODO: use exec
   // TODO: add blockfrost support
   // TODO: implemetet the rest of the methods
-  queryTip(): Tip {
-    const tip: Tip = JSON.parse(
-      execSync(`${this.cliPath} query tip \
-          ${this.network} \
+  async queryTip(): Promise<Tip> {
+    const tipRes = await exec(`${this.cliPath} query tip \
+          ${this.networkParam} \
           --cardano-mode
-                          `).toString()
-    );
+                          `);
+    const tip: Tip = JSON.parse(tipRes);
     return tip;
   }
 
-  queryProtocolParameters(): ProtocolParams {
-    execSync(`${this.cliPath} query protocol-parameters \
-                            ${this.network} \
+  async queryProtocolParameters(): Promise<ProtocolParams> {
+    const filePath = `${this.dir}/tmp/protocolParams.json`;
+    await exec(`${this.cliPath} query protocol-parameters \
+                            ${this.networkParam} \
                             --cardano-mode \
-                            --out-file ${this.dir}/tmp/protocolParams.json
+                            --out-file ${filePath}
                         `);
-    this.protocolParametersPath = `${this.dir}/tmp/protocolParams.json`;
-    const protocolParams: ProtocolParams = JSON.parse(
-      execSync(`cat ${this.dir}/tmp/protocolParams.json`).toString()
-    );
+    const stdoutProtocolParams = await exec(`cat ${filePath}`);
+    const protocolParams: ProtocolParams = JSON.parse(stdoutProtocolParams);
     return protocolParams;
   }
 
-  queryUtxo(address: string): Utxo[] {
-    const utxosRaw = execSync(`${this.cliPath} query utxo \
-            ${this.network} \
+  async queryUtxo(address: string): Promise<Utxo[]> {
+    const stdoutUtxo = await exec(`${this.cliPath} query utxo \
+            ${this.networkParam} \
             --address ${address} \
             --cardano-mode
-            `).toString();
-    const utxos = utxosRaw.split('\n');
+            `);
+
+    const utxos = stdoutUtxo.split('\n');
     utxos.splice(0, 1);
     utxos.splice(0, 1);
     utxos.splice(utxos.length - 1, 1);
@@ -138,12 +144,12 @@ export class CardanoCli {
     const vkeyFilePath = `${this.dir}/priv/wallet/${account}/${account}.payment.vkey`;
     const skeyFilePath = `${this.dir}/priv/wallet/${account}/${account}.payment.skey`;
 
-    if (existsSync(vkeyFilePath))
+    if (await checkFileExists(vkeyFilePath))
       return Promise.reject(`${vkeyFilePath} file already exists`);
-    if (existsSync(skeyFilePath))
+    if (await checkFileExists(skeyFilePath))
       return Promise.reject(`${skeyFilePath} file already exists`);
-    execSync(`mkdir -p ${this.dir}/priv/wallet/${account}`);
-    execSync(`${this.cliPath} address key-gen \
+    await exec(`mkdir -p ${this.dir}/priv/wallet/${account}`);
+    await exec(`${this.cliPath} address key-gen \
                         --verification-key-file ${vkeyFilePath} \
                         --signing-key-file ${skeyFilePath}
                     `);
@@ -177,10 +183,10 @@ export class CardanoCli {
       ? await auxScriptToString(this.dir, options.auxScript)
       : '';
 
-    if (!this.protocolParametersPath) this.queryProtocolParameters();
+    if (!this.protocolParametersPath) await this.queryProtocolParameters();
     const rawFilePath = `${this.dir}/tmp/tx_${fileUuid}.raw`;
     const scriptInvalid = options.scriptInvalid ? '--script-invalid' : '';
-    execSync(`${this.cliPath} transaction build-raw \
+    await exec(`${this.cliPath} transaction build-raw \
                 --babbage-era \
                 ${txInString} \
                 ${txOutString} \
@@ -194,7 +200,7 @@ export class CardanoCli {
                 --invalid-hereafter ${
                   options.invalidAfter
                     ? options.invalidAfter
-                    : this.queryTip().slot + 10000
+                    : (await this.queryTip()).slot + 10000
                 } \
                 --invalid-before ${
                   options.invalidBefore ? options.invalidBefore : 0
@@ -231,31 +237,30 @@ export class CardanoCli {
       ? `--stake-script-file ${await jsonToPath(this.dir, options.stakeScript)}`
       : '';
 
-    execSync(`${this.cliPath} address build \
+    await exec(`${this.cliPath} address build \
                     ${paymentVkey} \
                     ${stakeVkey} \
                     ${paymentScript} \
                     ${stakeScript} \
                     --out-file ${this.dir}/priv/wallet/${account}/${account}.payment.addr \
-                    ${this.network}
+                    ${this.networkParam}
                 `);
+
     return `${this.dir}/priv/wallet/${account}/${account}.payment.addr`;
   }
-  addressKeyHash(account: string): string {
-    return execSync(`${this.cliPath} address key-hash \
+  async addressKeyHash(account: string): Promise<string> {
+    const stdout = await exec(`${this.cliPath} address key-hash \
                               --payment-verification-key-file ${this.dir}/priv/wallet/${account}/${account}.payment.vkey \
-                          `)
-      .toString()
-      .trim();
+                          `);
+
+    return stdout.trim();
   }
-  addressInfo(address: string): AddressInfo {
-    const addressInfo: AddressInfo = JSON.parse(
-      execSync(`${this.cliPath} address info \
+  async addressInfo(address: string): Promise<AddressInfo> {
+    const stdout = await exec(`${this.cliPath} address info \
               --address ${address} \
-              `)
-        .toString()
-        .replace(/\s+/g, ' ')
-    );
+              `);
+
+    const addressInfo: AddressInfo = JSON.parse(stdout.replace(/\s+/g, ' '));
     return addressInfo;
   }
   async addressBuildScript(script: JSONValue): Promise<string> {
@@ -264,12 +269,11 @@ export class CardanoCli {
       `${this.dir}/tmp/script_${UID}.json`,
       JSON.stringify(script)
     );
-    const scriptAddr = execSync(
-      `${this.cliPath} address build-script --script-file ${this.dir}/tmp/script_${UID}.json ${this.network}`
-    )
-      .toString()
-      .replace(/\s+/g, ' ');
-    return scriptAddr;
+    const stdout = await exec(
+      `${this.cliPath} address build-script --script-file ${this.dir}/tmp/script_${UID}.json ${this.networkParam}`
+    );
+
+    return stdout.toString().replace(/\s+/g, ' ');
   }
 
   async transactionBuild(options: Transaction): Promise<string> {
@@ -303,8 +307,9 @@ export class CardanoCli {
       ? // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         `--witness-override ${options.witnessOverride}`
       : '';
-    if (!this.protocolParametersPath) this.queryProtocolParameters();
-    execSync(`${this.cliPath} transaction build \
+    if (!this.protocolParametersPath) await this.queryProtocolParameters();
+    const filePath = `${this.dir}/tmp/tx_${UID}.raw`;
+    await exec(`${this.cliPath} transaction build \
                 ${txInString} \
                 ${txOutString} \
                 ${txInCollateralString} \
@@ -318,31 +323,32 @@ export class CardanoCli {
                 --invalid-hereafter ${
                   options.invalidAfter
                     ? options.invalidAfter
-                    : this.queryTip().slot + 10000
+                    : (await this.queryTip()).slot + 10000
                 } \
                 --invalid-before ${
                   options.invalidBefore ? options.invalidBefore : 0
                 } \
-                --out-file ${this.dir}/tmp/tx_${UID}.raw \
+                --out-file ${filePath} \
                 ${changeAddressString} \
-                ${this.network} \
+                ${this.networkParam} \
                 --protocol-params-file ${this.protocolParametersPath} \
                 ${this.era}`);
 
-    return `${this.dir}/tmp/tx_${UID}.raw`;
+    return filePath;
   }
-  transactionCalculateMinFee(options: CalculateMinFeeOptions): string {
-    this.queryProtocolParameters();
-    return execSync(`${this.cliPath} transaction calculate-min-fee \
+  async transactionCalculateMinFee(
+    options: CalculateMinFeeOptions
+  ): Promise<string> {
+    await this.queryProtocolParameters();
+    const stdout = await exec(`${this.cliPath} transaction calculate-min-fee \
                       --tx-body-file ${options.txBody} \
                       --tx-in-count ${options.txIn.length} \
                       --tx-out-count ${options.txOut.length} \
-                      ${this.network} \
+                      ${this.networkParam} \
                       --witness-count ${options.witnessCount} \
-                      --protocol-params-file ${this.protocolParametersPath}`)
-      .toString()
-      .replace(/\s+/g, ' ')
-      .split(' ')[0];
+                      --protocol-params-file ${this.protocolParametersPath}`);
+
+    return stdout.toString().replace(/\s+/g, ' ').split(' ')[0];
   }
   async transactionPolicyid(script: JSONValue): Promise<string> {
     const UID = uuid();
@@ -350,34 +356,38 @@ export class CardanoCli {
       `${this.dir}/tmp/script_${UID}.json`,
       JSON.stringify(script)
     );
-    return execSync(
+    const stdout = await exec(
       `${this.cliPath} transaction policyid --script-file ${this.dir}/tmp/script_${UID}.json`
-    )
-      .toString()
-      .trim();
+    );
+
+    return stdout.toString().trim();
   }
-  transactionHashScriptData(script: JSONValue): string {
-    return execSync(
+  async transactionHashScriptData(script: JSONValue): Promise<string> {
+    const stdout = await exec(
       `${
         this.cliPath
       } transaction hash-script-data --script-data-value '${JSON.stringify(
         script
       )}'`
-    )
-      .toString()
-      .trim();
+    );
+
+    return stdout.toString().trim();
   }
-  transactionSign(options: TransationSignOptions): string {
+  async transactionSign(options: TransationSignOptions): Promise<string> {
     const UID = uuid();
     const signingKeys = signingKeysToString(options.signingKeys);
-    execSync(`${this.cliPath} transaction sign \
+    const filePath = `${this.dir}/tmp/tx_${UID}.signed`;
+    await exec(`${this.cliPath} transaction sign \
         --tx-body-file ${options.txBody} \
-        ${this.network} \
+        ${this.networkParam} \
         ${signingKeys} \
-        --out-file ${this.dir}/tmp/tx_${UID}.signed`);
-    return `${this.dir}/tmp/tx_${UID}.signed`;
+        --out-file ${filePath}`);
+
+    return filePath;
   }
-  transactionWitness(options: TransactionWitnessOptions): string {
+  async transactionWitness(
+    options: TransactionWitnessOptions
+  ): Promise<string> {
     const UID = uuid();
     if (!options.signingKey && !options.scriptFile) {
       throw new Error(
@@ -391,43 +401,51 @@ export class CardanoCli {
     if (options.signingKey) {
       signingParams += `--signing-key-file ${options.signingKey}`;
     }
-    execSync(`${this.cliPath} transaction witness \
+    const filePath = `${this.dir}/tmp/tx_${UID}.witness`;
+    await exec(`${this.cliPath} transaction witness \
         --tx-body-file ${options.txBody} \
-        --${this.network} \
-        --out-file ${this.dir}/tmp/tx_${UID}.witness \
+        ${this.networkParam} \
+        --out-file ${filePath} \
         ${signingParams}`);
-    return `${this.dir}/tmp/tx_${UID}.witness`;
+
+    return filePath;
   }
-  transactionAssemble(options: TransactionAssembleOptions): string {
+  async transactionAssemble(
+    options: TransactionAssembleOptions
+  ): Promise<string> {
     const UID = uuid();
     const witnessFiles = witnessFilesToString(options.witnessFiles);
     const filePath = `${this.dir}/tmp/tx_${UID}.signed`;
-    execSync(`${this.cliPath} transaction assemble \
+    await exec(`${this.cliPath} transaction assemble \
         --tx-body-file ${options.txBody} \
         ${witnessFiles} \
         --out-file ${filePath}`);
+
     return filePath;
   }
-  transactionCalculateMinValue(options: TxOut): string {
-    this.queryProtocolParameters();
+  async transactionCalculateMinValue(options: TxOut): Promise<string> {
+    await this.queryProtocolParameters();
     const multiAsset = multiAssetToString(options);
-    return execSync(`${this.cliPath} transaction calculate-min-required-utxo \
+    const stdout =
+      await exec(`${this.cliPath} transaction calculate-min-required-utxo \
                 --tx-out ${multiAsset} \
-                --protocol-params-file ${this.protocolParametersPath}`)
-      .toString()
-      .replace(/\s+/g, ' ')
-      .split(' ')[1];
+                --protocol-params-file ${this.protocolParametersPath}`);
+
+    return stdout.replace(/\s+/g, ' ').split(' ')[1];
   }
-  transactionCalculateMinRequiredUtxo(address: string, value: TxOut): string {
-    this.queryProtocolParameters();
+  async transactionCalculateMinRequiredUtxo(
+    address: string,
+    value: TxOut
+  ): Promise<string> {
+    await this.queryProtocolParameters();
     const multiAsset = multiAssetToString(value);
-    return execSync(`${this.cliPath} transaction calculate-min-required-utxo \
+    const stdout =
+      await exec(`${this.cliPath} transaction calculate-min-required-utxo \
                 --babbage-era \
                 --tx-out ${address}+${multiAsset} \
-                --protocol-params-file ${this.protocolParametersPath}`)
-      .toString()
-      .replace(/\s+/g, ' ')
-      .split(' ')[1];
+                --protocol-params-file ${this.protocolParametersPath}`);
+
+    return stdout.replace(/\s+/g, ' ').split(' ')[1];
   }
   async transactionSubmit(tx: string): Promise<string> {
     const UID = uuid();
@@ -442,26 +460,27 @@ export class CardanoCli {
     } else {
       parsedTx = tx;
     }
-    execSync(
-      `${this.cliPath} transaction submit ${this.network} --tx-file ${parsedTx}`
+    await exec(
+      `${this.cliPath} transaction submit ${this.networkParam} --tx-file ${parsedTx}`
     );
+
     return this.transactionTxid({ txFile: parsedTx });
   }
-  transactionTxid(options: TransactionViewOptions): string {
+  async transactionTxid(options: TransactionViewOptions): Promise<string> {
     const txArg = options.txBody
       ? `--tx-body-file ${options.txBody}`
       : `--tx-file ${options.txFile || ''}`;
-    return execSync(`${this.cliPath} transaction txid ${txArg}`)
-      .toString()
-      .trim();
+    const stdout = await exec(`${this.cliPath} transaction txid ${txArg}`);
+
+    return stdout.trim();
   }
-  transactionView(options: TransactionViewOptions): string {
+  async transactionView(options: TransactionViewOptions): Promise<string> {
     const txArg = options.txBody
       ? `--tx-body-file ${options.txBody}`
       : `--tx-file ${options.txFile || ''}`;
-    return execSync(`${this.cliPath} transaction view ${txArg}`)
-      .toString()
-      .trim();
+    const stdout = await exec(`${this.cliPath} transaction view ${txArg}`);
+
+    return stdout.trim();
   }
 
   toLovelace(ada: string): string {
@@ -501,14 +520,3 @@ export class CardanoCli {
   //   ): string;
   //   stakePoolDeregistrationCertificate(poolName: string, epoch: number): string;
 }
-
-// const cardanoCli = new CardanoCli({ network: '--testnet-magic 1097911063' });
-// console.log(cardanoCli.cliPath);
-// cardanoCli
-//   .addressKeyGen('tamir')
-//   .then(x => {
-//     console.log(x);
-//   })
-//   .catch(error => {
-//     console.log(error);
-//   });
