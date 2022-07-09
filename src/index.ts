@@ -1,16 +1,7 @@
-import { exec as cpExec, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import { promises as fs, existsSync, readFileSync } from 'fs';
 import { uuid } from 'uuidv4';
 import Big from 'big.js';
-import util from 'util';
-
-const pexec = util.promisify(cpExec);
-
-const exec = async (command: string) => {
-  const { stdout, stderr } = await pexec(command);
-  if (stderr) return Promise.reject(stderr);
-  return stdout;
-};
 
 import {
   ConstructorOptions,
@@ -33,6 +24,7 @@ import {
   auxScriptToString,
   certToString,
   checkFileExists,
+  exec,
   jsonToPath,
   mintToString,
   multiAssetToString,
@@ -109,6 +101,7 @@ export class CardanoCli {
             --cardano-mode
             `);
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const utxos = stdoutUtxo.split('\n');
     utxos.splice(0, 1);
     utxos.splice(0, 1);

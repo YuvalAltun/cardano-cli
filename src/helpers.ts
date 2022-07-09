@@ -1,7 +1,16 @@
 import { promises as fs, existsSync, constants } from 'fs';
+import { exec as cpExec } from 'child_process';
+import util from 'util';
 import { uuid } from 'uuidv4';
 import { Mint, TxIn, TxOut, Withdrawal } from './interfaces';
 import { JSONValue } from './types';
+const pexec = util.promisify(cpExec);
+
+export const exec = async (command: string): Promise<string> => {
+  const { stdout, stderr } = await pexec(command);
+  if (stderr) return Promise.reject(stderr);
+  return stdout;
+};
 
 export const readJsonFile = async (filePath: string): Promise<JSONValue> => {
   const jsonFileContent = await fs.readFile(filePath);
