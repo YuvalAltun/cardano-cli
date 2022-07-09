@@ -1,6 +1,6 @@
 {
   "name": "cardano-cli",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "A package to operate cardano-cli from nodejs",
   "main": "./lib/src/index.js",
   "files": [
@@ -10,6 +10,7 @@
     "build": "tsc",
     "clean": "rm -rf ./lib/",
     "lint": "eslint ./src/ --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prepare": "husky install",
     "test:watch": "jest --watch",
     "test": "jest --coverage",
@@ -25,20 +26,20 @@
     "email": "yuval.altun101@gmail.com"
   },
   "engines": {
-    "node": ">=12.0"
+    "node": ">=16.0"
   },
   "keywords": [
     "cardano-cli",
     "typescript",
     "vscode",
     "cardano"
-
   ],
   "bugs": {
     "url": "https://github.com/YuvalAltun/cardano-cli/issues"
   },
   "homepage": "https://github.com/YuvalAltun/cardano-cli",
   "devDependencies": {
+    "@types/big.js": "^6.1.5",
     "@types/jest": "^27.5.2",
     "@types/node": "^12.20.11",
     "@typescript-eslint/eslint-plugin": "^4.22.0",
@@ -62,5 +63,10 @@
     "branches": [
       "master"
     ]
+  },
+  "dependencies": {
+    "big.js": "^6.2.0",
+    "execa": "5.1.1",
+    "uuidv4": "^6.2.13"
   }
 }

@@ -117,3 +117,7 @@ dist
 
 # Compiled code
 lib/
+
+priv/*
+
+tmp/*

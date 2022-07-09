@@ -1,13 +1,12 @@
-import { myPackage } from '../src';
+import { CardanoCli } from '../src';
 
 describe('index', () => {
-  describe('myPackage', () => {
-    it('should return a string containing the message', () => {
-      const message = 'Hello';
+  describe('create instance', () => {
+    it('should return the cardano-cli path', () => {
+      const instance = new CardanoCli({});
+      const cliPath = instance.cliPath;
 
-      const result = myPackage(message);
-
-      expect(result).toMatch(message);
+      expect(cliPath).toMatch('cardano-cli');
     });
   });
 });
